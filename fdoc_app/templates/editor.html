@@ -32,6 +32,49 @@
   </section>
 
   <section id="editor-main" class="editor-main-layout" hidden>
+    <aside id="editor-ai-rail" class="editor-ai-rail" aria-label="AI 对话">
+      <div class="editor-ai-rail-card editor-ai-rail-intro">
+        <p class="eyebrow">AI Chat</p>
+        <h3>左侧实时对话区</h3>
+        <p class="section-note">左键选中文本后，浮层会贴着选区出现，点一下就能把片段加入这里再提问。</p>
+        <button id="editor-ai-ask-button" class="ghost-button" type="button">聚焦对话</button>
+      </div>
+
+      <div class="editor-ai-rail-card">
+        <div class="chat-preset-row">
+          <label class="chat-preset-field">
+            <span>角色预设</span>
+            <select id="chat-role-preset">
+              <option>专业产品经理</option>
+              <option>专业投资人</option>
+              <option>专业工程师</option>
+              <option>专业数据分析师</option>
+            </select>
+          </label>
+          <label class="chat-preset-field">
+            <span>提示说明</span>
+            <input id="chat-persona-note" type="text" placeholder="补充这次对话的目标" />
+          </label>
+        </div>
+      </div>
+
+      <div class="editor-ai-rail-card chat-context-panel">
+        <p class="handoff-label">已加入对话的片段</p>
+        <div id="chat-context-list" class="chat-context-list"></div>
+      </div>
+
+      <div class="editor-ai-rail-card chat-message-card">
+        <p class="handoff-label">对话记录</p>
+        <form id="chat-form" class="chat-form">
+          <textarea id="chat-input" rows="4" placeholder="输入你的问题，然后点发送"></textarea>
+          <div class="chat-form-actions">
+            <button id="chat-send-button" class="primary-button" type="submit">发送</button>
+          </div>
+        </form>
+        <div id="chat-messages" class="chat-message-list"></div>
+      </div>
+    </aside>
+
     <div class="editor-main-column">
       <div class="editor-frame-shell">
         <div class="editor-frame-header">
@@ -49,6 +92,10 @@
               <button id="mode-edit-button" class="ghost-button is-active" type="button">编辑视图</button>
               <button id="mode-review-button" class="ghost-button" type="button">角色审阅</button>
             </div>
+            <div class="editor-version-actions">
+              <button id="confirm-change-button" class="primary-button" type="button">确认更改</button>
+              <p id="version-status-text" class="version-status-text">修改完成后点击确认，记录版本并生成 AI 结论。</p>
+            </div>
             <div class="editor-role-strip">
               <span class="toolbar-label">角色视角</span>
               <div id="role-switcher" class="role-switcher"></div>
@@ -56,14 +103,106 @@
           </div>
         </div>
         <div class="editor-frame-inner">
+          <div id="linked-doc-strip" class="linked-doc-strip" hidden>
+            <div class="linked-doc-strip-head">
+              <p class="eyebrow">Linked Docs</p>
+              <span class="section-note">确认关联后，可在这里快速查看关联文档原文，只读不可修改。</span>
+            </div>
+            <div id="linked-doc-links" class="linked-doc-links"></div>
+          </div>
           <div id="markdown-editor" class="markdown-editor-host"></div>
-          <section id="review-surface" class="review-surface" hidden>
-            <div class="review-surface-topbar">
+      <section id="review-surface" class="review-surface" hidden>
+        <div id="beyond-tabs" class="beyond-tabs">
+          <section id="code-lab-panel" class="beyond-panel" hidden>
+            <div class="beyond-panel-head">
               <div>
-                <p class="eyebrow">Role Review</p>
+                <p class="eyebrow">Code Lab</p>
+                <h3>代码实验区</h3>
+              </div>
+              <span id="code-lab-role-badge" class="status-pill">当前角色</span>
+            </div>
+            <div class="code-lab-layout">
+              <div class="code-lab-editor-card">
+                <label class="chat-preset-field">
+                  <span>语言</span>
+                  <select id="code-lab-language">
+                    <option value="html">HTML</option>
+                    <option value="js">JavaScript</option>
+                    <option value="python">Python</option>
+                    <option value="c">C</option>
+                    <option value="java">Java</option>
+                  </select>
+                </label>
+                <textarea id="code-lab-input" class="code-lab-input" rows="12" placeholder="输入代码，HTML/JS 会在浏览器沙箱中运行，其他语言先做解释与伪运行。"></textarea>
+                <div class="code-lab-actions">
+                  <button id="code-lab-run-button" class="primary-button" type="button">运行代码</button>
+                  <button id="code-lab-fill-sample-button" class="ghost-button" type="button">填充示例</button>
+                </div>
+              </div>
+              <div class="code-lab-result-card">
+                <p class="handoff-label">运行结果 / 解释</p>
+                <div id="code-lab-result" class="code-lab-result"></div>
+                <div id="code-lab-preview" class="code-lab-preview"></div>
+              </div>
+            </div>
+          </section>
+
+          <section id="viz-assist-panel" class="beyond-panel" hidden>
+            <div class="beyond-panel-head">
+              <div>
+                <p class="eyebrow">Viz</p>
+                <h3>数据可视化区</h3>
+              </div>
+              <button id="viz-link-source-button" class="ghost-button" type="button">链接数据源</button>
+            </div>
+            <p id="viz-placeholder-notice" class="viz-placeholder-notice">当前未链接数据源，采取预置数据显示</p>
+            <div class="viz-preview-grid">
+              <div class="viz-table-card">
+                <p class="handoff-label">预置表格</p>
+                <div id="viz-table"></div>
+              </div>
+              <div class="viz-chart-card">
+                <div id="viz-chart-visual" class="viz-chart-visual"></div>
+                <p class="handoff-label">图表建议</p>
+                <div id="viz-chart-summary" class="summary-copy"></div>
+                <div id="viz-chart-hints" class="viz-chip-row"></div>
+              </div>
+            </div>
+            <p class="section-note">当前 csv 只支持上传一行或一列的数据生成可视化表格。</p>
+            <input id="viz-source-input" type="file" accept=".csv,.tsv,.txt,.md" hidden>
+          </section>
+
+          <section id="relation-panel" class="beyond-panel" hidden>
+            <div class="beyond-panel-head">
+              <div>
+                <p class="eyebrow">Relations</p>
+                <h3>关联文档</h3>
+              </div>
+              <div class="relation-actions">
+                <span class="status-pill">后台预置文档 + 选择确认</span>
+                <button id="relation-refresh-button" class="ghost-button" type="button">加载文档</button>
+                <button id="relation-confirm-button" class="primary-button" type="button">确认关联</button>
+              </div>
+            </div>
+            <div id="relation-overview" class="summary-copy"></div>
+            <div id="relation-list" class="relation-list"></div>
+            <div class="relation-graph-shell">
+              <p class="handoff-label">关系图</p>
+              <div id="relation-graph" class="relation-graph"></div>
+            </div>
+            <p class="section-note">关联文档来源于后台预置 md，用户确认后生成关系图。</p>
+          </section>
+        </div>
+
+        <div class="review-surface-topbar">
+          <div>
+            <p class="eyebrow">Role Review</p>
                 <h3 id="review-surface-title">当前角色：工程师</h3>
               </div>
-              <button id="review-expand-all-button" class="ghost-button" type="button">展开全部</button>
+              <div class="review-surface-actions">
+                <button id="review-confirm-button" class="primary-button" type="button">确认并下一角色</button>
+                <button id="review-expand-all-button" class="ghost-button" type="button">展开全部</button>
+              </div>
             </div>
             <div id="folded-summary-bar" class="folded-summary-bar" hidden></div>
             <div id="review-content" class="review-content"></div>
@@ -88,17 +227,27 @@
       <div class="task-drawer-header">
         <div>
           <p class="eyebrow">AI Summary</p>
-          <h2>文档摘要</h2>
+          <h2>摘要 / 时间轴</h2>
         </div>
         <button id="close-left-summary-drawer" class="drawer-icon-button" type="button" aria-label="关闭摘要">×</button>
       </div>
-      <div class="left-summary-body">
-        <p id="left-summary-text" class="summary-copy"></p>
-        <div class="left-summary-block">
-          <p class="handoff-label">当前角色关注</p>
-          <ul id="left-summary-focus-list" class="topic-list"></ul>
-        </div>
+      <div class="drawer-tab-row left-drawer-tabs">
+        <button id="drawer-tab-left-summary" class="drawer-tab-button is-active" type="button">摘要</button>
+        <button id="drawer-tab-version-timeline" class="drawer-tab-button" type="button">时间轴</button>
       </div>
+      <section id="drawer-panel-left-summary" class="drawer-panel">
+        <div class="left-summary-body">
+          <p id="left-summary-text" class="summary-copy"></p>
+          <div class="left-summary-block">
+            <p class="handoff-label">当前角色关注</p>
+            <ul id="left-summary-focus-list" class="topic-list"></ul>
+          </div>
+        </div>
+      </section>
+      <section id="drawer-panel-version-timeline" class="drawer-panel" hidden>
+        <p class="section-note">版本时间轴用于决策溯源，记录每次确认更改后的摘要与结论。</p>
+        <div id="version-timeline-list" class="version-timeline-list"></div>
+      </section>
     </aside>
 
     <aside id="task-drawer" class="task-drawer" aria-hidden="true">
@@ -138,6 +287,24 @@
         </div>
       </section>
     </aside>
+
+    <div id="chat-selection-popover" class="chat-selection-popover" hidden>
+      <button id="add-selection-to-chat-button" class="ghost-button" type="button">添加到对话</button>
+    </div>
+
+    <div id="linked-doc-popover" class="linked-doc-popover" hidden>
+      <div class="linked-doc-popover-card">
+        <div class="linked-doc-popover-head">
+          <div>
+            <p class="eyebrow">Linked Document</p>
+            <h3 id="linked-doc-popover-title">关联文档</h3>
+          </div>
+          <button id="close-linked-doc-popover" class="drawer-icon-button" type="button" aria-label="关闭关联文档">×</button>
+        </div>
+        <p id="linked-doc-popover-meta" class="section-note"></p>
+        <pre id="linked-doc-popover-content" class="linked-doc-popover-content"></pre>
+      </div>
+    </div>
   </section>
 </main>
 {% endblock %}

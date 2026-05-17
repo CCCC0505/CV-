@@ -8,8 +8,24 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi import Request
 
-from fdoc_app.models import AnalyzeRequest
+from fdoc_app.models import (
+    AnalyzeRequest,
+    ChatRequest,
+    CodeLabRequest,
+    DocRelationsRequest,
+    FoldPlanRequest,
+    ReviewEnrichRequest,
+    VersionSummaryRequest,
+    VizAssistRequest,
+)
 from fdoc_app.services.qwen import AnalysisServiceError, QwenAnalyzer
+from fdoc_app.services.qwen_code import QwenCodeLabService
+from fdoc_app.services.qwen_fold import QwenFoldPlanner
+from fdoc_app.services.qwen_chat import QwenChatService
+from fdoc_app.services.qwen_relation import QwenDocRelationService
+from fdoc_app.services.qwen_review import QwenReviewEnricher
+from fdoc_app.services.qwen_version import QwenVersionSummarizer
+from fdoc_app.services.qwen_viz import QwenVizService
 
 
 PACKAGE_DIR = Path(__file__).resolve().parent
@@ -55,6 +71,28 @@ PRESET_REGISTRY = {
         "recommended_workflow": ["产品经理", "工程师", "数据分析员", "CEO"],
         "filename": "data-review.md",
     },
+    "release-checklist": {
+        "id": "release-checklist",
+        "title": "发布检查清单",
+        "description": "面向上线前验收、灰度、回滚和对外沟通的简洁检查文档。",
+        "category": "协作向",
+        "difficulty": "中等",
+        "tags": ["上线准备", "风险检查", "回滚方案"],
+        "highlights": ["发布前核对", "风险与回滚", "协作交接"],
+        "recommended_workflow": ["产品经理", "工程师", "测试", "CEO"],
+        "filename": "release-checklist.md",
+    },
+    "weekly-brief": {
+        "id": "weekly-brief",
+        "title": "运营周报摘要",
+        "description": "围绕周度指标、波动说明和下一步动作整理的运营复盘文档。",
+        "category": "数据向",
+        "difficulty": "中等",
+        "tags": ["周报", "指标监控", "复盘"],
+        "highlights": ["周度趋势", "异常波动", "行动项"],
+        "recommended_workflow": ["运营", "数据分析员", "CEO"],
+        "filename": "weekly-brief.md",
+    },
 }
 
 
@@ -62,6 +100,13 @@ app = FastAPI(title="FDoc", version="0.1.0")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 analyzer = QwenAnalyzer()
+chat_service = QwenChatService()
+code_lab_service = QwenCodeLabService()
+viz_service = QwenVizService()
+relation_service = QwenDocRelationService()
+review_enricher = QwenReviewEnricher()
+fold_planner = QwenFoldPlanner()
+version_summarizer = QwenVersionSummarizer()
 STATIC_VERSION = str(int(app.version.split(".")[0]) if app.version else 1)
 
 
@@ -198,3 +243,129 @@ async def analyze_document(payload: AnalyzeRequest) -> JSONResponse:
             status_code=exc.status_code,
         )
     return JSONResponse(analysis.model_dump())
+
+
+@app.post("/api/review-enrich")
+async def enrich_review(payload: ReviewEnrichRequest) -> JSONResponse:
+    try:
+        review = review_enricher.enrich(payload)
+    except AnalysisServiceError as exc:
+        return JSONResponse(
+            {
+                "error": {
+                    "code": exc.code,
+                    "message": exc.message,
+                    "details": exc.details,
+                }
+            },
+            status_code=exc.status_code,
+        )
+    return JSONResponse(review.model_dump())
+
+
+@app.post("/api/chat")
+async def chat(payload: ChatRequest) -> JSONResponse:
+    try:
+        response = chat_service.chat(payload)
+    except AnalysisServiceError as exc:
+        return JSONResponse(
+            {
+                "error": {
+                    "code": exc.code,
+                    "message": exc.message,
+                    "details": exc.details,
+                }
+            },
+            status_code=exc.status_code,
+        )
+    return JSONResponse(response.model_dump())
+
+
+@app.post("/api/code-lab")
+async def code_lab(payload: CodeLabRequest) -> JSONResponse:
+    try:
+        response = code_lab_service.assist(payload)
+    except AnalysisServiceError as exc:
+        return JSONResponse(
+            {
+                "error": {
+                    "code": exc.code,
+                    "message": exc.message,
+                    "details": exc.details,
+                }
+            },
+            status_code=exc.status_code,
+        )
+    return JSONResponse(response.model_dump())
+
+
+@app.post("/api/viz-assist")
+async def viz_assist(payload: VizAssistRequest) -> JSONResponse:
+    try:
+        response = viz_service.assist(payload)
+    except AnalysisServiceError as exc:
+        return JSONResponse(
+            {
+                "error": {
+                    "code": exc.code,
+                    "message": exc.message,
+                    "details": exc.details,
+                }
+            },
+            status_code=exc.status_code,
+        )
+    return JSONResponse(response.model_dump())
+
+
+@app.post("/api/doc-relations")
+async def doc_relations(payload: DocRelationsRequest) -> JSONResponse:
+    try:
+        response = relation_service.recommend(payload)
+    except AnalysisServiceError as exc:
+        return JSONResponse(
+            {
+                "error": {
+                    "code": exc.code,
+                    "message": exc.message,
+                    "details": exc.details,
+                }
+            },
+            status_code=exc.status_code,
+        )
+    return JSONResponse(response.model_dump())
+
+
+@app.post("/api/fold-plan")
+async def fold_plan(payload: FoldPlanRequest) -> JSONResponse:
+    try:
+        response = fold_planner.plan(payload)
+    except AnalysisServiceError as exc:
+        return JSONResponse(
+            {
+                "error": {
+                    "code": exc.code,
+                    "message": exc.message,
+                    "details": exc.details,
+                }
+            },
+            status_code=exc.status_code,
+        )
+    return JSONResponse(response.model_dump())
+
+
+@app.post("/api/version-summary")
+async def summarize_version(payload: VersionSummaryRequest) -> JSONResponse:
+    try:
+        summary = version_summarizer.summarize_version(payload)
+    except AnalysisServiceError as exc:
+        return JSONResponse(
+            {
+                "error": {
+                    "code": exc.code,
+                    "message": exc.message,
+                    "details": exc.details,
+                }
+            },
+            status_code=exc.status_code,
+        )
+    return JSONResponse(summary.model_dump())

@@ -41,91 +41,75 @@ class QwenSettings:
     timeout_seconds: int
 
 
-class QwenAnalyzer:
+class DashScopeClient:
     def __init__(self) -> None:
         self.settings = QwenSettings(
             api_key=os.getenv("DASHSCOPE_API_KEY"),
             model=os.getenv("QWEN_MODEL", DEFAULT_QWEN_MODEL),
             endpoint=os.getenv("DASHSCOPE_ENDPOINT", DEFAULT_DASHSCOPE_URL),
-            timeout_seconds=max(5, int(os.getenv("DASHSCOPE_TIMEOUT_SECONDS", "60"))),
+            timeout_seconds=max(5, int(os.getenv("DASHSCOPE_TIMEOUT_SECONDS", "45"))),
         )
 
-    def analyze(self, payload: AnalyzeRequest) -> AnalyzeResponse:
-        if not self.settings.api_key:
-            raise AnalysisServiceError(
-                "后端未配置 DASHSCOPE_API_KEY，暂时无法调用千问分析。",
-                code="missing_api_key",
-                status_code=503,
-            )
-
-        raw_content = self._call_analysis_model(payload)
-        parsed = self._parse_content(raw_content)
-
-        try:
-            response = AnalyzeResponse.model_validate(parsed)
-            self._ensure_alignment(response, payload.workflow)
-            return response
-        except (json.JSONDecodeError, ValidationError, AnalysisServiceError):
-            repaired = self._repair_json(raw_content, payload.workflow)
-            response = AnalyzeResponse.model_validate(repaired)
-            self._ensure_alignment(response, payload.workflow)
-            return response
-
-    def _call_analysis_model(self, payload: AnalyzeRequest) -> str:
-        messages = [
-            {
-                "role": "system",
-                "content": self._build_system_prompt(payload.workflow),
-            },
-            {
-                "role": "user",
-                "content": self._build_user_prompt(payload),
-            },
-        ]
-        response = self._post_chat_completion(
-            {
-                "model": self.settings.model,
-                "messages": messages,
-                "response_format": {"type": "json_object"},
-                "temperature": 0.2,
-            }
+    def ensure_configured(self) -> None:
+        if self.settings.api_key:
+            return
+        raise AnalysisServiceError(
+            "后端未配置 DASHSCOPE_API_KEY，暂时无法调用千问分析。",
+            code="missing_api_key",
+            status_code=503,
         )
+
+    def post_json_completion(self, messages: List[Dict[str, str]], *, temperature: float = 0.1) -> str:
+        payload = {
+            "model": self.settings.model,
+            "messages": messages,
+            "response_format": {"type": "json_object"},
+            "temperature": temperature,
+        }
+        response = self._post_chat_completion(payload)
         return self._extract_message_content(response)
 
-    def _repair_json(self, broken_content: str, workflow: List[str]) -> Dict[str, Any]:
-        try:
-            return json.loads(self._extract_json_text(broken_content))
-        except json.JSONDecodeError:
-            pass
-
-        repair_messages = [
-            {
-                "role": "system",
-                "content": (
-                    "你是一个 JSON 修复助手。请把用户提供的分析结果修复成合法 JSON，"
-                    "不要补充解释，不要输出 Markdown 代码块。JSON 中 role_flow.stages 和 roles "
-                    "必须严格按这个工作流顺序输出："
-                    f"{json.dumps(workflow, ensure_ascii=False)}。"
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    "请修复下面这段 JSON，使其成为合法 JSON 字符串，并保留原有语义。\n"
-                    f"{broken_content}"
-                ),
-            },
-        ]
-        repaired = self._post_chat_completion(
-            {
-                "model": self.settings.model,
-                "messages": repair_messages,
-                "response_format": {"type": "json_object"},
-                "temperature": 0,
-            }
+    def repair_json(self, broken_content: str, workflow: List[str], schema_hint: str) -> Dict[str, Any]:
+        repaired = self.post_json_completion(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是 JSON 修复助手。"
+                        "只输出合法 JSON，不要解释。"
+                        f" 工作流顺序必须严格保持：{json.dumps(workflow, ensure_ascii=False)}。"
+                        f" 输出结构必须满足：{schema_hint}"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"请把下面内容修复为合法 JSON：\n{broken_content}",
+                },
+            ],
+            temperature=0,
         )
-        repaired_content = self._extract_message_content(repaired)
-        return json.loads(self._extract_json_text(repaired_content))
+        return json.loads(self.extract_json_text(repaired))
+
+    def parse_json_content(self, content: str) -> Dict[str, Any]:
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            return json.loads(self.extract_json_text(content))
+
+    def extract_json_text(self, text: str) -> str:
+        candidate = text.strip()
+        candidate = re.sub(r"^```(?:json)?\s*", "", candidate, flags=re.IGNORECASE)
+        candidate = re.sub(r"\s*```$", "", candidate)
+
+        if candidate.startswith("{") and candidate.endswith("}"):
+            return candidate
+
+        start = candidate.find("{")
+        end = candidate.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            return candidate[start : end + 1]
+
+        raise json.JSONDecodeError("No JSON object found", text, 0)
 
     def _post_chat_completion(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         body = json.dumps(payload).encode("utf-8")
@@ -133,7 +117,7 @@ class QwenAnalyzer:
             self.settings.endpoint,
             data=body,
             headers={
-                "Authorization": "Bearer {}".format(self.settings.api_key),
+                "Authorization": f"Bearer {self.settings.api_key}",
                 "Content-Type": "application/json",
             },
             method="POST",
@@ -201,26 +185,189 @@ class QwenAnalyzer:
 
         return content
 
-    def _parse_content(self, content: str) -> Dict[str, Any]:
+
+class QwenAnalyzer:
+    def __init__(self) -> None:
+        self.client = DashScopeClient()
+        self.settings = self.client.settings
+
+    def analyze(self, payload: AnalyzeRequest) -> AnalyzeResponse:
+        self.client.ensure_configured()
+
+        raw_content = self.client.post_json_completion(
+            [
+                {"role": "system", "content": self._build_system_prompt(payload.workflow)},
+                {"role": "user", "content": self._build_user_prompt(payload)},
+            ]
+        )
+
         try:
-            return json.loads(content)
-        except json.JSONDecodeError:
-            return json.loads(self._extract_json_text(content))
+            parsed = self._normalize_analysis_payload(self.client.parse_json_content(raw_content), payload.workflow)
+            response = AnalyzeResponse.model_validate(parsed)
+            self._ensure_alignment(response, payload.workflow)
+            return response
+        except (json.JSONDecodeError, ValidationError, AnalysisServiceError):
+            repaired = self._normalize_analysis_payload(
+                self.client.repair_json(raw_content, payload.workflow, self._analysis_schema_hint()),
+                payload.workflow,
+            )
+            try:
+                response = AnalyzeResponse.model_validate(repaired)
+                self._ensure_alignment(response, payload.workflow)
+                return response
+            except (ValidationError, AnalysisServiceError) as exc:
+                raise AnalysisServiceError(
+                    "AI 返回的数据结构无法自动修复，请重试或缩短文档后再分析。",
+                    code="invalid_analysis_payload",
+                    status_code=502,
+                    details={"error": str(exc)},
+                ) from exc
 
-    def _extract_json_text(self, text: str) -> str:
-        candidate = text.strip()
-        candidate = re.sub(r"^```(?:json)?\s*", "", candidate, flags=re.IGNORECASE)
-        candidate = re.sub(r"\s*```$", "", candidate)
+    def _normalize_analysis_payload(self, payload: Dict[str, Any], workflow: List[str]) -> Dict[str, Any]:
+        role_flow = payload.get("role_flow") if isinstance(payload.get("role_flow"), dict) else {}
+        raw_stages = role_flow.get("stages")
+        stages_by_role = self._map_items_by_role(raw_stages)
+        raw_stage_list = raw_stages if isinstance(raw_stages, list) else []
 
-        if candidate.startswith("{") and candidate.endswith("}"):
-            return candidate
+        normalized_stages = []
+        for index, role in enumerate(workflow):
+            next_role = workflow[index + 1] if index + 1 < len(workflow) else ""
+            fallback_handoff = f"向{next_role}交接本环节的关键结论和交付物" if next_role else "汇总结论并结束当前流转"
+            raw_stage = stages_by_role.get(self._role_key(role))
+            if raw_stage is None and index < len(raw_stage_list) and isinstance(raw_stage_list[index], dict):
+                raw_stage = raw_stage_list[index]
 
-        start = candidate.find("{")
-        end = candidate.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return candidate[start : end + 1]
+            normalized_stages.append(
+                {
+                    "role": role,
+                    "stage_goal": self._safe_text(
+                        self._get_dict_value(raw_stage, "stage_goal"),
+                        fallback=f"完成 {role} 环节的核心目标",
+                    ),
+                    "stage_input": self._safe_text(self._get_dict_value(raw_stage, "stage_input")),
+                    "watch_points": self._safe_list(self._get_dict_value(raw_stage, "watch_points")),
+                    "stage_output": self._safe_text(self._get_dict_value(raw_stage, "stage_output")),
+                    "handoff_to_next": self._safe_text(
+                        self._get_dict_value(raw_stage, "handoff_to_next"),
+                        fallback=fallback_handoff,
+                    ),
+                }
+            )
 
-        raise json.JSONDecodeError("No JSON object found", text, 0)
+        raw_roles = payload.get("roles")
+        roles_by_role = self._map_items_by_role(raw_roles)
+        raw_role_list = raw_roles if isinstance(raw_roles, list) else []
+        normalized_roles = []
+        for index, role in enumerate(workflow):
+            raw_role = roles_by_role.get(self._role_key(role))
+            if raw_role is None and index < len(raw_role_list) and isinstance(raw_role_list[index], dict):
+                raw_role = raw_role_list[index]
+
+            normalized_roles.append(
+                {
+                    "role": role,
+                    "task": self._safe_text(
+                        self._get_dict_value(raw_role, "task"),
+                        fallback=f"围绕文档完成 {role} 环节的核心任务",
+                    ),
+                    "focus_points": self._safe_list(
+                        self._get_dict_value(raw_role, "focus_points"),
+                        fallback=[f"{role} 需要重点关注的交付与风险"],
+                    ),
+                    "brief_summary": self._safe_text(
+                        self._get_dict_value(raw_role, "brief_summary"),
+                        fallback=f"{role} 负责推进并交付本环节的关键结果",
+                    ),
+                }
+            )
+
+        raw_schedule = payload.get("task_schedule")
+        raw_schedule_list = raw_schedule if isinstance(raw_schedule, list) else []
+        normalized_schedule = []
+        task_count = max(len(workflow), len(raw_schedule_list))
+        for index in range(task_count):
+            raw_item = raw_schedule_list[index] if index < len(raw_schedule_list) and isinstance(raw_schedule_list[index], dict) else {}
+            owner_candidate = self._safe_text(raw_item.get("owner"))
+            owner = owner_candidate if owner_candidate in workflow else workflow[min(index, len(workflow) - 1)]
+            input_from = self._safe_list(raw_item.get("input_from"))
+            if not input_from and index > 0:
+                input_from = [workflow[min(index - 1, len(workflow) - 1)]]
+
+            normalized_schedule.append(
+                {
+                    "step": self._safe_int(raw_item.get("step"), index + 1),
+                    "owner": owner,
+                    "goal": self._safe_text(raw_item.get("goal"), fallback=f"推进 {owner} 环节的工作目标"),
+                    "input_from": input_from,
+                    "output": self._safe_text(raw_item.get("output"), fallback=f"{owner} 的阶段性交付物"),
+                    "priority": self._safe_priority(raw_item.get("priority")),
+                }
+            )
+
+        return {
+            "document_summary": self._safe_text(
+                payload.get("document_summary"),
+                fallback="文档分析已完成，可根据岗位流转图查看各角色分工与交接内容。",
+            ),
+            "role_flow": {
+                "title": self._safe_text(role_flow.get("title"), fallback="岗位流转图"),
+                "stages": normalized_stages,
+            },
+            "roles": normalized_roles,
+            "task_schedule": normalized_schedule,
+        }
+
+    def _safe_text(self, value: Any, fallback: str = "") -> str:
+        if value is None:
+            return fallback
+        if isinstance(value, list):
+            cleaned = [str(item).strip() for item in value if str(item).strip()]
+            return "；".join(cleaned) if cleaned else fallback
+        text = str(value).strip()
+        return text or fallback
+
+    def _safe_list(self, value: Any, fallback: Optional[List[str]] = None) -> List[str]:
+        if value is None:
+            return list(fallback or [])
+        if isinstance(value, list):
+            cleaned = [str(item).strip() for item in value if str(item).strip()]
+            return cleaned or list(fallback or [])
+        text = str(value).strip()
+        if not text:
+            return list(fallback or [])
+        return [text]
+
+    def _safe_int(self, value: Any, fallback: int) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return fallback
+        return parsed if parsed > 0 else fallback
+
+    def _safe_priority(self, value: Any) -> str:
+        text = self._safe_text(value, fallback="medium").lower()
+        return text if text in {"high", "medium", "low"} else "medium"
+
+    def _map_items_by_role(self, value: Any) -> Dict[str, Dict[str, Any]]:
+        if not isinstance(value, list):
+            return {}
+        mapped: Dict[str, Dict[str, Any]] = {}
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            role = self._safe_text(item.get("role"))
+            if not role:
+                continue
+            mapped[self._role_key(role)] = item
+        return mapped
+
+    def _role_key(self, value: str) -> str:
+        return str(value or "").strip().lower()
+
+    def _get_dict_value(self, value: Any, key: str) -> Any:
+        if not isinstance(value, dict):
+            return None
+        return value.get(key)
 
     def _ensure_alignment(self, response: AnalyzeResponse, workflow: List[str]) -> None:
         if len(response.role_flow.stages) != len(workflow):
@@ -250,9 +397,7 @@ class QwenAnalyzer:
                 },
             )
 
-        invalid_owners = [
-            item.owner for item in response.task_schedule if item.owner.strip() not in workflow
-        ]
+        invalid_owners = [item.owner for item in response.task_schedule if item.owner.strip() not in workflow]
         if invalid_owners:
             raise AnalysisServiceError(
                 "AI 返回的任务安排中出现了工作流之外的岗位。",
@@ -261,86 +406,41 @@ class QwenAnalyzer:
                 details={"owners": invalid_owners, "workflow": workflow},
             )
 
-    def _build_system_prompt(self, workflow: List[str]) -> str:
-        workflow_json = json.dumps(workflow, ensure_ascii=False)
+    def _analysis_schema_hint(self) -> str:
         return (
-            "你是 FDoc 的岗位流转分析助手。请阅读文档并输出一个 JSON 对象。"
-            "输出必须是纯 JSON，不要使用 Markdown 代码块，不要添加解释文字。"
-            "JSON 的 role_flow.stages 和 roles 数组长度必须与工作流完全一致，"
-            "并且 role 字段必须严格等于这个工作流数组中的对应元素："
-            "{}。".format(workflow_json)
-            + "task_schedule 的 owner 只能从该工作流中选择。"
-            + "你需要让 role_flow 更适合前端渲染为岗位流转图或表格。"
-            + "当前版本会做角色审阅视图，所以请为每个岗位返回 review_summary、review_checklist，"
-            + "并在 view_hints 中补充 review_keywords。"
-            + "原文不能被改写，view_hints 和 review 字段只用于视图层提示。"
+            "{document_summary, role_flow:{title, stages:[{role, stage_goal, stage_input, "
+            "watch_points, stage_output, handoff_to_next}]}, roles:[{role, task, focus_points, "
+            "brief_summary}], task_schedule:[{step, owner, goal, input_from, output, priority}]}"
+        )
+
+    def _build_system_prompt(self, workflow: List[str]) -> str:
+        return (
+            "你是 FDoc 的岗位流转分析助手。"
+            "只输出合法 JSON，不要 markdown，不要解释。"
+            f" role_flow.stages 和 roles 的 role 必须严格按这个顺序输出：{json.dumps(workflow, ensure_ascii=False)}。"
+            " task_schedule.owner 只能从这些岗位中选择。"
+            " 输出必须基于文档内容本身，不要写空泛模板句，不要使用“原始文档+业务目标”这类套话。"
+            " 每个岗位都要给出真实可执行的任务、关注点、输入输出和交接说明，允许简洁，但必须具体。"
         )
 
     def _build_user_prompt(self, payload: AnalyzeRequest) -> str:
-        schema = {
-            "document_summary": "一句到两句的文档整体摘要",
-            "role_flow": {
-                "title": "岗位流转图",
-                "stages": [
-                    {
-                        "role": payload.workflow[0],
-                        "stage_goal": "该岗位在本环节的一句话目标",
-                        "stage_input": "该岗位进入当前环节时最主要的输入",
-                        "watch_points": ["该岗位当前环节最该注意的点"],
-                        "stage_output": "该岗位完成本环节后输出的交付物",
-                        "handoff_to_next": "该岗位要向下一岗位交接什么内容",
-                    }
-                ],
-            },
-            "roles": [
-                {
-                    "role": payload.workflow[0],
-                    "task": "该岗位的核心任务",
-                    "focus_points": ["重点关注项1", "重点关注项2"],
-                    "brief_summary": "该岗位的一句话摘要",
-                    "review_summary": "该岗位进入审阅视角后，右侧摘要 Tab 使用的一段简短摘要",
-                    "review_checklist": ["该岗位审阅时要确认的事项 1", "该岗位审阅时要确认的事项 2"],
-                    "view_hints": {
-                        "priority_topics": ["建议优先阅读的主题"],
-                        "foldable_topics": ["未来可折叠隐藏的主题"],
-                        "review_keywords": ["用于匹配正文段落的关键词"],
-                        "note": "这只是未来的视图提示，不改变原文",
-                    },
-                }
-            ],
-            "task_schedule": [
-                {
-                    "step": 1,
-                    "owner": payload.workflow[0],
-                    "goal": "当前步骤目标",
-                    "input_from": [],
-                    "output": "交付产物",
-                    "priority": "high",
-                }
-            ],
-        }
+        workflow_json = json.dumps(payload.workflow, ensure_ascii=False)
         return (
-            "请根据下面的文档和工作流，生成 JSON 分析结果。\n"
+            "返回固定 JSON，字段只有：document_summary、role_flow、roles、task_schedule。\n"
             "要求：\n"
-            "1. 返回值必须是一个合法 JSON 对象。\n"
-            "2. document_summary 简短清晰。\n"
-            "3. role_flow.stages、roles 必须与工作流一一对应，顺序不能改变。\n"
-            "4. 每个 stage 还要有 stage_input、watch_points、stage_output。\n"
-            "5. 每个岗位都要有 task、focus_points、brief_summary、review_summary、review_checklist、view_hints。\n"
-            "6. view_hints 中必须包含 priority_topics、foldable_topics、review_keywords、note。\n"
-            "7. task_schedule 要覆盖整个工作流，可多于工作流节点，但 owner 必须来自工作流。\n"
-            "8. JSON 中 priority 只能是 high、medium、low。\n"
-            "9. review_keywords 请尽量给出能在正文中定位相关段落的短词，不要是长句。\n"
-            "10. 如果最后一个岗位没有下一个岗位，handoff_to_next 请写“流程结束，输出最终结论与归档结果”。\n\n"
-            "工作流：{}\n"
-            "文档名称：{}\n"
-            "文档来源：{}\n"
-            "JSON 示例结构：{}\n\n"
-            "文档正文：\n{}"
-        ).format(
-            json.dumps(payload.workflow, ensure_ascii=False),
-            payload.document_name,
-            payload.source_type,
-            json.dumps(schema, ensure_ascii=False),
-            payload.document_content,
+            "1. document_summary 1到2句话。\n"
+            "2. role_flow.title 固定为 岗位流转图。\n"
+            "3. role_flow.stages 按工作流顺序输出，每项仅含 role、stage_goal、stage_input、watch_points、stage_output、handoff_to_next。\n"
+            "4. stage_goal 要写该岗位这一环节真正要完成什么；stage_input 要写接收到的材料；stage_output 要写交付物；handoff_to_next 要写向下一岗位传递什么。\n"
+            "5. watch_points 给 2 到 4 条最值得盯住的风险、边界、依赖或验收点。\n"
+            "6. roles 按工作流顺序输出，每项仅含 role、task、focus_points、brief_summary。\n"
+            "7. task 要写该岗位的核心动作，不要写空话；focus_points 给 2 到 4 条具体重点；brief_summary 用一句话概括该岗位要做成什么。\n"
+            "8. task_schedule 覆盖全流程，每一步都要写清 step、owner、goal、input_from、output、priority，priority 只能是 high、medium、low。\n"
+            "9. 如果文档里信息不足，可以合理补全业务协作常识，但要尽量贴合文档语境。\n"
+            "10. 所有字符串保持简洁，但必须具体，不要重复，不要泛化。\n\n"
+            f"工作流：{workflow_json}\n"
+            f"文档名称：{payload.document_name}\n"
+            f"文档来源：{payload.source_type}\n"
+            "文档正文：\n"
+            f"{payload.document_content}"
         )

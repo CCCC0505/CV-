@@ -1,5 +1,6 @@
 (function () {
   const STORAGE_KEY = "fdoc-state";
+  const MAX_DOCUMENT_CHARS = 5000;
   const DEFAULT_WORKFLOW = ["产品经理", "工程师", "数据分析员", "CEO"];
   const PRESET_ROLES = ["产品经理", "工程师", "数据分析员", "CEO", "设计师", "测试", "运营", "市场", "财务", "法务"];
 
@@ -10,6 +11,8 @@
     sourceType: "",
     analysis: null,
     presets: [],
+    reviewEnrichPending: false,
+    beyond: {},
   };
 
   const elements = {
@@ -61,6 +64,12 @@
       if (parsed.analysis) {
         state.analysis = parsed.analysis;
       }
+      if (typeof parsed.reviewEnrichPending === "boolean") {
+        state.reviewEnrichPending = parsed.reviewEnrichPending;
+      }
+      if (parsed.beyond && typeof parsed.beyond === "object") {
+        state.beyond = parsed.beyond;
+      }
     } catch (error) {
       console.warn("Failed to parse persisted FDoc state", error);
     }
@@ -75,8 +84,113 @@
         documentContent: state.documentContent,
         sourceType: state.sourceType,
         analysis: state.analysis,
+        reviewEnrichPending: state.reviewEnrichPending,
+        beyond: state.beyond || {},
       }),
     );
+  }
+
+  function buildReviewEnrichPayload() {
+    if (!state.analysis || !Array.isArray(state.analysis.roles) || !state.analysis.roles.length) {
+      return null;
+    }
+
+    return {
+      document_name: state.documentName,
+      document_content: state.documentContent,
+      workflow: state.workflow,
+      source_type: state.sourceType,
+      roles: state.analysis.roles.map((role) => ({
+        role: role.role,
+        task: role.task,
+        focus_points: role.focus_points || [],
+        brief_summary: role.brief_summary,
+      })),
+    };
+  }
+
+  function mergeReviewEnrichment(reviewData) {
+    if (!state.analysis || !reviewData || !Array.isArray(reviewData.roles)) {
+      return;
+    }
+
+    const byRole = new Map(
+      reviewData.roles.map((item) => [String(item.role || "").trim().toLowerCase(), item]),
+    );
+
+    state.analysis.roles = (state.analysis.roles || []).map((role) => {
+      const key = String(role.role || "").trim().toLowerCase();
+      const review = byRole.get(key);
+      if (!review) {
+        return role;
+      }
+      return {
+        ...role,
+        review_summary: review.review_summary || role.review_summary || "",
+        review_checklist: Array.isArray(review.review_checklist) ? review.review_checklist : role.review_checklist || [],
+        view_hints: {
+          ...(role.view_hints || {}),
+          ...(review.view_hints || {}),
+        },
+      };
+    });
+  }
+
+  async function enrichReviewInBackground(options) {
+    const config = options || {};
+    const payload = buildReviewEnrichPayload();
+    if (!payload || state.reviewEnrichPending) {
+      return;
+    }
+
+    const hasExistingReview = (state.analysis.roles || []).every((role) => {
+      const hints = role.view_hints || {};
+      return (
+        (role.review_summary && role.review_summary.trim()) ||
+        (Array.isArray(role.review_checklist) && role.review_checklist.length) ||
+        (Array.isArray(hints.priority_topics) && hints.priority_topics.length) ||
+        (Array.isArray(hints.review_keywords) && hints.review_keywords.length)
+      );
+    });
+
+    if (hasExistingReview && !config.force) {
+      return;
+    }
+
+    state.reviewEnrichPending = true;
+    persistState();
+
+    try {
+      const response = await fetch("/api/review-enrich", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const rawText = await response.text();
+      const data = rawText ? JSON.parse(rawText) : null;
+      if (!response.ok) {
+        throw new Error((data && data.error && data.error.message) || "角色审阅增强失败");
+      }
+
+      mergeReviewEnrichment(data);
+      state.reviewEnrichPending = false;
+      persistState();
+
+      if (config.notify) {
+        setFeedback("基础分析完成，角色审阅信息也已补充。", "success");
+      }
+    } catch (error) {
+      console.warn("Failed to enrich review data", error);
+      state.reviewEnrichPending = false;
+      persistState();
+
+      if (config.notify) {
+        setFeedback("基础分析已完成，角色审阅信息稍后可在编辑区继续加载。", "success");
+      }
+    }
   }
 
   function escapeHtml(value) {
@@ -264,12 +378,20 @@
   }
 
   function updateAnalyzeButtonState() {
-    const ready = state.workflow.length > 0 && state.documentContent.trim().length > 0;
+    const ready =
+      state.workflow.length > 0 &&
+      state.documentContent.trim().length > 0 &&
+      state.documentContent.length <= MAX_DOCUMENT_CHARS;
     elements.analyzeButton.disabled = !ready;
+  }
+
+  function isDocumentTooLarge(content) {
+    return String(content || "").length > MAX_DOCUMENT_CHARS;
   }
 
   function resetAnalysis() {
     state.analysis = null;
+    state.reviewEnrichPending = false;
     persistState();
     elements.analysisResultSection.hidden = true;
     elements.roleFlowGraph.innerHTML = "";
@@ -368,6 +490,9 @@
       if (!response.ok) {
         throw new Error(data.detail || "无法读取预置文档");
       }
+      if (isDocumentTooLarge(data.content)) {
+        throw new Error(`当前版本暂不支持超过 ${MAX_DOCUMENT_CHARS} 字符的文档，请选择更短的预置文档。`);
+      }
       state.documentName = data.document_name;
       state.documentContent = data.content;
       state.sourceType = "preset";
@@ -398,8 +523,22 @@
 
     const reader = new FileReader();
     reader.onload = function onLoad(loadEvent) {
+      const content = String(loadEvent.target && loadEvent.target.result ? loadEvent.target.result : "");
+      if (isDocumentTooLarge(content)) {
+        event.target.value = "";
+        resetAnalysis();
+        state.documentName = "";
+        state.documentContent = "";
+        state.sourceType = "";
+        updateUploadMeta("", 0);
+        updateDocumentMeta();
+        updateAnalyzeButtonState();
+        persistState();
+        setFeedback(`当前版本暂不支持超过 ${MAX_DOCUMENT_CHARS} 字符的文档，请先精简内容后再分析。`, "error");
+        return;
+      }
       state.documentName = file.name;
-      state.documentContent = String(loadEvent.target && loadEvent.target.result ? loadEvent.target.result : "");
+      state.documentContent = content;
       state.sourceType = "upload";
       resetAnalysis();
       updateUploadMeta(file.name, file.size);
@@ -496,6 +635,12 @@
       return;
     }
 
+    if (isDocumentTooLarge(state.documentContent)) {
+      setFeedback(`当前版本暂不支持超过 ${MAX_DOCUMENT_CHARS} 字符的文档，请先精简内容后再分析。`, "error");
+      updateAnalyzeButtonState();
+      return;
+    }
+
     setFeedback("正在请求千问生成岗位流转图，请稍候…");
     elements.analyzeButton.disabled = true;
     elements.analyzeButton.textContent = "分析中...";
@@ -529,10 +674,12 @@
       }
 
       state.analysis = data;
+      state.reviewEnrichPending = true;
       persistState();
       renderRoleFlowGraph(data.role_flow);
       elements.analysisResultSection.hidden = false;
       setFeedback("分析完成，岗位流转图已生成。", "success");
+      void enrichReviewInBackground({ notify: false, force: true });
     } catch (error) {
       resetAnalysis();
       setFeedback(error.message || "分析失败，请稍后再试。", "error");
@@ -574,6 +721,9 @@
     }
     renderRoleFlowGraph(state.analysis.role_flow);
     elements.analysisResultSection.hidden = false;
+    if (state.reviewEnrichPending) {
+      void enrichReviewInBackground({ notify: false });
+    }
   }
 
   function toggleWorkflowDrawer() {
