@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block content %}
+<main class="setup-page">
+  <header class="page-topbar">
+    <a class="brand-link" href="/">FDoc</a>
+    <div class="page-topbar-actions">
+      <span class="status-pill" id="qwen-status-pill">准备中</span>
+    </div>
+  </header>
+
+  <section class="page-intro narrow-section">
+    <p class="eyebrow">Setup & Analysis</p>
+    <h1>先确定流转路径，再生成岗位流转图</h1>
+    <p>
+      这一步只做工作流配置和文档准备。分析成功后，页面下方才会出现进入编辑区的入口。
+    </p>
+  </section>
+
+  <section class="diagram-frame panel">
+    <iframe src="/diagram-embed" title="岗位流转示意图"></iframe>
+  </section>
+
+  <section class="setup-grid">
+    <div class="panel workflow-panel">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Workflow</p>
+          <h2>选择工作流</h2>
+          <p class="section-note">备注：请选择这份文档将在哪些岗位之间流动</p>
+        </div>
+        <button id="workflow-drawer-toggle" class="drawer-toggle" type="button" aria-expanded="false" aria-controls="workflow-drawer">
+          <span>展开配置</span>
+          <span class="drawer-arrow">›</span>
+        </button>
+      </div>
+
+      <div class="workflow-preview" id="selected-workflow-preview">
+        <span class="empty-inline-state">当前使用默认工作流：产品经理 → 工程师 → 数据分析员 → CEO</span>
+      </div>
+
+      <div class="workflow-drawer" id="workflow-drawer" hidden>
+        <div class="workflow-drawer-section">
+          <div class="drawer-row">
+            <div>
+              <h3>默认流程</h3>
+              <p>快速使用推荐的跨岗位流转顺序。</p>
+            </div>
+            <button id="use-default-workflow" class="ghost-button" type="button">使用默认流程</button>
+          </div>
+          <div class="default-workflow-line">
+            <span>产品经理</span>
+            <span>工程师</span>
+            <span>数据分析员</span>
+            <span>CEO</span>
+          </div>
+        </div>
+
+        <div class="workflow-drawer-section">
+          <div class="drawer-row">
+            <div>
+              <h3>自定义流程</h3>
+              <p>勾选岗位、补充自定义角色，并拖动排序。</p>
+            </div>
+            <button id="apply-custom-workflow" class="ghost-button" type="button">应用当前配置</button>
+          </div>
+
+          <div class="role-selector-grid" id="preset-role-selector"></div>
+
+          <div class="custom-role-box">
+            <label for="custom-role-input">添加自定义岗位</label>
+            <div class="input-inline">
+              <input id="custom-role-input" type="text" maxlength="40" placeholder="例如：客户成功经理">
+              <button id="add-custom-role" class="ghost-button" type="button">添加</button>
+            </div>
+          </div>
+
+          <div class="workflow-order-box">
+            <h4>当前顺序</h4>
+            <ul id="workflow-order-list" class="workflow-order-list"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel document-panel">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Document</p>
+          <h2>上传文档或选择预置文档</h2>
+          <p class="section-note">目前只支持 md、txt 格式。</p>
+        </div>
+      </div>
+
+      <div class="upload-card">
+        <label class="upload-dropzone" for="document-upload">
+          <input id="document-upload" type="file" accept=".md,.txt,text/markdown,text/plain">
+          <strong>点击上传</strong>
+          <span>或把 .md / .txt 文件拖到这里</span>
+        </label>
+        <div id="upload-file-meta" class="upload-file-meta"></div>
+      </div>
+
+      <div class="preset-card">
+        <div class="preset-header">
+          <h3>预置文档</h3>
+          <button id="refresh-presets" class="text-button" type="button">刷新</button>
+        </div>
+        <div id="preset-list" class="preset-list"></div>
+      </div>
+
+      <div class="document-summary-box">
+        <h3>当前文档概览</h3>
+        <div id="document-meta" class="document-meta empty-state">
+          尚未选择文档
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="analysis-actions narrow-section">
+    <button id="analyze-button" class="primary-button large-button" type="button" disabled>开始分析</button>
+    <p id="analysis-feedback" class="feedback-text"></p>
+  </section>
+
+  <section id="analysis-result-section" class="analysis-result-section" hidden>
+    <div class="panel">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">AI Result</p>
+          <h2>岗位流转图</h2>
+        </div>
+      </div>
+      <div id="role-flow-graph" class="role-flow-graph"></div>
+      <div class="analysis-entry-action">
+        <button id="enter-editor-button" class="primary-button large-button" type="button">进入编辑区</button>
+      </div>
+    </div>
+  </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', path='setup.js') }}?v={{ static_version }}"></script>
+{% endblock %}

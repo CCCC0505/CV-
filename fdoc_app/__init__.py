@@ -1,0 +1,2 @@
+"""FDoc application package."""
+

@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block content %}
+<main class="legacy-homepage">
+  <div class="legacy-home-container">
+    <section class="legacy-hero">
+      <div class="legacy-brand">FDoc</div>
+      <h1>THE DOCUMENT EDITOR THAT FOLLOWS YOUR WORKFLOW</h1>
+      <p class="legacy-subtitle">
+        FDoc keeps the full markdown document intact while adding workflow setup,
+        role handoff analysis, and task orchestration around it.
+      </p>
+      <div class="legacy-value-props">
+        <span>FULL ORIGINAL TEXT</span>
+        <span>WORKFLOW-FIRST</span>
+        <span>AI ROLE FLOW</span>
+      </div>
+    </section>
+
+    <section class="legacy-section">
+      <h2>AN ANALYSIS-FIRST FLOW</h2>
+      <ul class="legacy-list">
+        <li><strong>SET THE WORKFLOW FIRST</strong> - Choose who this document flows through before editing starts</li>
+        <li><strong>KEEP THE SOURCE OF TRUTH</strong> - The original markdown stays intact inside the editor</li>
+        <li><strong>SHOW TASKS OUTSIDE THE DOC</strong> - AI outputs live in flow cards and schedule panels, not in the正文 layer</li>
+      </ul>
+      <div class="legacy-quote">
+        "One document, multiple roles, zero loss of the original text."
+      </div>
+    </section>
+
+    <section class="legacy-section">
+      <h2>JUST A CLEAR FLOW</h2>
+      <div class="legacy-diagram-frame">
+        <iframe src="/diagram-embed" title="FDoc flow diagram"></iframe>
+      </div>
+      <div class="legacy-pillars">
+        <div class="legacy-pillar">1. <strong>SELECT A WORKFLOW</strong> - Define the order of roles around the document</div>
+        <div class="legacy-pillar">2. <strong>ANALYZE BEFORE EDITING</strong> - Generate the role handoff view first</div>
+        <div class="legacy-pillar">3. <strong>EDIT THE FULL ORIGINAL</strong> - Keep every line of the markdown source available</div>
+      </div>
+    </section>
+
+    <section class="legacy-section">
+      <h2>SEE IT IN ACTION</h2>
+      <div class="legacy-demo-grid">
+        <div class="legacy-demo-panel">
+          <div class="legacy-demo-header">FULL ORIGINAL DOCUMENT</div>
+          <div class="legacy-editor-shell">
+            <div id="legacy-home-editor-main" class="legacy-demo-editor"></div>
+          </div>
+        </div>
+        <div class="legacy-demo-panel">
+          <div class="legacy-demo-header">WORKFLOW-READY EDITING</div>
+          <div class="legacy-editor-shell">
+            <div id="legacy-home-editor-toolbar" class="legacy-demo-editor"></div>
+          </div>
+        </div>
+      </div>
+      <p class="legacy-callout">
+        The document editor stays simple. Workflow decisions, summaries, and task assignments happen around it.
+      </p>
+    </section>
+
+    <section class="legacy-section">
+      <h2>THE BEST OF BOTH WORLDS</h2>
+      <div class="legacy-two-columns">
+        <div class="legacy-column">
+          <h3>YOU GET:</h3>
+          <ul>
+            <li><span class="legacy-check">+</span> A markdown editor that keeps the complete original text</li>
+            <li><span class="legacy-check">+</span> Workflow analysis before the editing workspace opens</li>
+            <li><span class="legacy-check">+</span> Role-by-role summaries and task schedules alongside the doc</li>
+          </ul>
+        </div>
+        <div class="legacy-column">
+          <h3>WITHOUT:</h3>
+          <ul>
+            <li><span class="legacy-cross">-</span> AI rewriting the original markdown body</li>
+            <li><span class="legacy-cross">-</span> Mixing workflow setup into the main editing surface</li>
+            <li><span class="legacy-cross">-</span> Losing context between setup, analysis, and editing</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="legacy-section legacy-cta-section">
+      <h2>START WITH THE FLOW</h2>
+      <div class="legacy-cta-buttons">
+        <a class="legacy-button legacy-button-primary" href="/setup">View Demo</a>
+      </div>
+      <div class="legacy-cta-note">Configure the workflow first. Enter the editor only after the role flow is generated.</div>
+    </section>
+  </div>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script src="/assets/overtype.min.js?v={{ static_version }}"></script>
+<script src="{{ url_for('static', path='index.js') }}?v={{ static_version }}"></script>
+{% endblock %}

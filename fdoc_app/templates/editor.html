@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block content %}
+<main class="editor-page">
+  <header class="page-topbar editor-topbar">
+    <a class="brand-link" href="/">FDoc</a>
+    <div class="editor-meta-inline">
+      <div>
+        <p class="meta-label">当前文档</p>
+        <strong id="editor-document-name">未加载</strong>
+      </div>
+      <div>
+        <p class="meta-label">工作流</p>
+        <div id="editor-workflow-tags" class="tag-list"></div>
+      </div>
+    </div>
+    <div class="page-topbar-actions">
+      <a class="ghost-button as-link" href="/setup">返回配置页</a>
+      <button id="left-summary-button" class="ghost-button" type="button">摘要</button>
+      <button id="task-drawer-button" class="secondary-button" type="button">
+        审阅面板
+        <span id="task-drawer-badge" class="notification-badge" hidden>新</span>
+      </button>
+    </div>
+  </header>
+
+  <section id="editor-guard" class="narrow-section guard-message" hidden>
+    <div class="panel">
+      <h1>请先完成分析</h1>
+      <p>当前没有可用的工作流和分析结果，系统会返回配置页继续完成设置。</p>
+    </div>
+  </section>
+
+  <section id="editor-main" class="editor-main-layout" hidden>
+    <div class="editor-main-column">
+      <div class="editor-frame-shell">
+        <div class="editor-frame-header">
+          <div class="editor-frame-heading">
+            <p class="eyebrow">Document Workspace</p>
+            <h1>完整原文编辑区</h1>
+            <p id="editor-mode-note" class="section-note">
+              编辑视图始终保留完整原文；切换到角色审阅时，只会在视图层折叠不相关段落。
+            </p>
+            <p id="document-summary-text" class="summary-copy editor-summary-inline"></p>
+            <p id="editor-inline-alert" class="editor-inline-alert" hidden></p>
+          </div>
+          <div class="editor-frame-controls">
+            <div class="review-mode-toggle-group">
+              <button id="mode-edit-button" class="ghost-button is-active" type="button">编辑视图</button>
+              <button id="mode-review-button" class="ghost-button" type="button">角色审阅</button>
+            </div>
+            <div class="editor-role-strip">
+              <span class="toolbar-label">角色视角</span>
+              <div id="role-switcher" class="role-switcher"></div>
+            </div>
+          </div>
+        </div>
+        <div class="editor-frame-inner">
+          <div id="markdown-editor" class="markdown-editor-host"></div>
+          <section id="review-surface" class="review-surface" hidden>
+            <div class="review-surface-topbar">
+              <div>
+                <p class="eyebrow">Role Review</p>
+                <h3 id="review-surface-title">当前角色：工程师</h3>
+              </div>
+              <button id="review-expand-all-button" class="ghost-button" type="button">展开全部</button>
+            </div>
+            <div id="folded-summary-bar" class="folded-summary-bar" hidden></div>
+            <div id="review-content" class="review-content"></div>
+          </section>
+        </div>
+      </div>
+
+      <section class="panel role-analysis-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Roles</p>
+            <h2>岗位分析卡片</h2>
+          </div>
+        </div>
+        <div id="role-analysis-grid" class="role-analysis-grid"></div>
+      </section>
+    </div>
+
+    <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+
+    <aside id="left-summary-drawer" class="side-drawer side-drawer-left" aria-hidden="true">
+      <div class="task-drawer-header">
+        <div>
+          <p class="eyebrow">AI Summary</p>
+          <h2>文档摘要</h2>
+        </div>
+        <button id="close-left-summary-drawer" class="drawer-icon-button" type="button" aria-label="关闭摘要">×</button>
+      </div>
+      <div class="left-summary-body">
+        <p id="left-summary-text" class="summary-copy"></p>
+        <div class="left-summary-block">
+          <p class="handoff-label">当前角色关注</p>
+          <ul id="left-summary-focus-list" class="topic-list"></ul>
+        </div>
+      </div>
+    </aside>
+
+    <aside id="task-drawer" class="task-drawer" aria-hidden="true">
+      <div class="task-drawer-header">
+        <div>
+          <p class="eyebrow">Review Panel</p>
+          <h2>角色审阅面板</h2>
+        </div>
+        <button id="close-task-drawer" class="drawer-icon-button" type="button" aria-label="关闭任务安排">×</button>
+      </div>
+      <div class="drawer-tab-row">
+        <button id="drawer-tab-schedule" class="drawer-tab-button is-active" type="button">任务安排</button>
+        <button id="drawer-tab-role-summary" class="drawer-tab-button" type="button">角色摘要</button>
+      </div>
+      <section id="drawer-panel-schedule" class="drawer-panel">
+        <div id="task-schedule-list" class="task-schedule-list"></div>
+      </section>
+      <section id="drawer-panel-role-summary" class="drawer-panel" hidden>
+        <div class="role-summary-pane">
+          <div class="role-summary-header-card">
+            <p class="eyebrow">Active Role</p>
+            <h3 id="active-role-summary-title">工程师</h3>
+            <p id="active-role-summary-text" class="summary-copy"></p>
+          </div>
+          <div class="role-summary-checklist-card">
+            <p class="handoff-label">审阅清单</p>
+            <ul id="role-summary-checklist" class="drawer-checklist"></ul>
+          </div>
+          <div class="role-summary-checklist-card">
+            <p class="handoff-label">重点主题</p>
+            <ul id="role-summary-topic-list" class="topic-list"></ul>
+          </div>
+          <div class="role-summary-checklist-card">
+            <p class="handoff-label">当前角色任务安排</p>
+            <div id="role-summary-schedule-list" class="task-schedule-list task-schedule-list-compact"></div>
+          </div>
+        </div>
+      </section>
+    </aside>
+  </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script src="/assets/overtype.min.js?v={{ static_version }}"></script>
+<script src="{{ url_for('static', path='editor.js') }}?v={{ static_version }}"></script>
+{% endblock %}
