@@ -1,5 +1,3 @@
-注意这个压缩包要先解压到主文件夹中
-解压缩位置参考图片
 # FDoc
 
 基于 `FastAPI + OverType` 的岗位流转型 Markdown 文档编辑器示例。
