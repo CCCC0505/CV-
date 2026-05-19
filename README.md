@@ -1,3 +1,5 @@
+# 当前版本为V0.8 后续更新版本功能暂未调试完成
+后续功能补充详情参考pdf
 # FDoc
 
 基于 `FastAPI + OverType` 的岗位流转型 Markdown 文档编辑器示例。
